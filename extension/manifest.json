@@ -1,0 +1,40 @@
+{
+  "manifest_version": 3,
+  "name": "飞书原文朗读",
+  "version": "0.5.4",
+  "description": "保留飞书原文排版，用 Kokoro 本地中英文语音朗读，按音素时间戳同步高亮。",
+  "permissions": [
+    "offscreen",
+    "activeTab",
+    "scripting",
+    "storage"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_title": "打开飞书原文朗读"
+  },
+  "minimum_chrome_version": "135",
+  "content_security_policy": {
+    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "*://*.feishu.cn/*"
+      ],
+      "js": [
+        "core.js",
+        "content.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "cross_origin_embedder_policy": {
+    "value": "require-corp"
+  },
+  "cross_origin_opener_policy": {
+    "value": "same-origin"
+  }
+}

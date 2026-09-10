@@ -1,0 +1,14 @@
+.DS_Store
+node_modules/
+work/
+dist/
+outputs/
+.env
+env.txt
+.venv/
+extension/assets/*.onnx
+extension/assets/*.bin
+extension/assets/*.download
+extension/runtime/
+extension/kokoro-worker.js
+extension/offscreen.js

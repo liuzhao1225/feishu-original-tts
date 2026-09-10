@@ -1,0 +1,22 @@
+{
+  "name": "feishu-original-tts",
+  "version": "0.5.4",
+  "license": "GPL-3.0-or-later",
+  "private": true,
+  "scripts": {
+    "test": "node --test tests/*.test.cjs tests/*.test.mjs",
+    "check": "node --check extension/content.js && node --check extension/core.js && node --check extension/background.js",
+    "package": "npm run build && node scripts/package.cjs",
+    "build": "node scripts/build.cjs",
+    "assets": "node scripts/assets.mjs",
+    "smoke": "node scripts/smoke.mjs"
+  },
+  "dependencies": {
+    "onnxruntime-web": "1.29.0",
+    "phonemizer": "1.2.1",
+    "pinyin-pro": "3.28.1"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.2"
+  }
+}

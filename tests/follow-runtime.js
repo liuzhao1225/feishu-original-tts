@@ -1,0 +1,42 @@
+document.getElementById('run').onclick=async()=>{
+ const out=document.getElementById('result');document.getElementById('run').disabled=true;
+ const wait=ms=>new Promise(resolve=>setTimeout(resolve,ms));
+ const frame=document.getElementById('fixture'),w=frame.contentWindow,doc=w.document;
+ const results=[],metrics={};
+ const ui=doc.getElementById('feishu-original-tts').shadowRoot,$=id=>ui.getElementById(id),d=()=>w.FeishuOriginalTTS.diagnostics();
+ const scroller=doc.querySelector('.bear-web-x-container');
+ const emit=event=>w.testBridge.emit(event);
+ const zone=doc.querySelector('[data-record-id="p5"] .text-editor');
+ zone.style.cssText='width:420px;font-size:20px;line-height:36px';
+ zone.textContent='这一句用于检查上一句末尾的跟随位置'.repeat(5)+'。'+'接下来这一句比较长需要占据多行来检查是否发生上下跳动'.repeat(5)+'。';
+ const rect=offset=>{const range=doc.createRange();range.setStart(zone.firstChild,offset);range.setEnd(zone.firstChild,offset+1);return range.getBoundingClientRect();};
+ const centerError=offset=>{const r=rect(offset),s=scroller.getBoundingClientRect(),bar=doc.getElementById('feishu-original-tts').getBoundingClientRect();return Math.abs((r.top+r.bottom)/2-(Math.max(0,s.top)+Math.min(s.bottom,bar.top))/2);};
+ const check=(ok,label)=>results.push({ok,label});
+ try{
+  await wait(100);$('play').click();for(let i=0;i<100&&!d().playing;i++)await wait(50);
+  if(!d().playing)throw new Error('Fixture playback did not start');
+  const record=d().records.find(r=>r.key==='p5');$('seek').value=record.absolute;$('seek').dispatchEvent(new w.Event('input'));$('seek').dispatchEvent(new w.Event('change'));await wait(150);
+  emit({type:'word',charIndex:d().current.text.length-3,length:2});await wait(100);
+  emit({type:'end'});await wait(150);
+  metrics.newSentenceStartError=centerError(d().current.start);
+  check(metrics.newSentenceStartError<3,'new sentence centers its first line');
+  const transitionTop=scroller.scrollTop;emit({type:'word',charIndex:0,length:2});await wait(150);
+  metrics.firstWordJump=scroller.scrollTop-transitionTop;
+  check(Math.abs(metrics.firstWordJump)<3,'first word does not reverse the sentence transition scroll');
+  const nearEnd=d().current.text.length-3;emit({type:'word',charIndex:nearEnd,length:2});
+  const beforeGap=scroller.scrollTop;emit({type:'word-end'});scroller.dispatchEvent(new w.Event('scroll'));await wait(150);
+  metrics.wordGapJump=scroller.scrollTop-beforeGap;
+  check(Math.abs(metrics.wordGapJump)<3,'word gap retains last spoken position through repaint');
+  const start=d().current.start,end=d().current.end;
+  let boundary=start+1;while(boundary<end&&Math.abs(rect(boundary).top-rect(boundary-1).top)<3)boundary++;
+  if(boundary===end)throw new Error('Expected multiline sentence');
+  emit({type:'word',charIndex:boundary-start-1,length:2});await wait(150);
+  check(centerError(boundary-1)<3,'word spanning lines centers its first character');
+  scroller.dispatchEvent(new w.WheelEvent('wheel',{deltaY:120,bubbles:true}));scroller.scrollTop+=120;await wait(100);
+  const freeTop=scroller.scrollTop;emit({type:'word',charIndex:nearEnd,length:2});emit({type:'word-end'});scroller.dispatchEvent(new w.Event('scroll'));await wait(150);
+  check(Math.abs(scroller.scrollTop-freeTop)<3&&!d().following,'free browsing keeps scroll position through word and gap');
+  $('follow').click();await wait(150);
+  check(centerError(start+nearEnd)<3&&d().following&&$('follow').hidden,'return to follow centers retained spoken position and hides button');
+  $('play').click();check(w.fixtureErrors.length===0,'fixture has no uncaught errors or rejected promises');out.textContent=JSON.stringify({ok:results.every(r=>r.ok),metrics,results,errors:w.fixtureErrors});
+ }catch(error){out.textContent=JSON.stringify({ok:false,metrics,results,error:String(error)});}
+};
