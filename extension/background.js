@@ -60,8 +60,10 @@ chrome.runtime.onConnect.addListener(port => {
     }
   });
 });
-chrome.runtime.onMessage.addListener((message, sender) => {
-  if (sender.id !== chrome.runtime.id || message.target !== 'kokoro-background' || message.requestKey !== owner?.requestKey) return;
+chrome.runtime.onMessage.addListener((message, sender, respond) => {
+  if (sender.id !== chrome.runtime.id || message.target !== 'kokoro-background') return;
+  if (message.type === 'voices') { respond({type:'voices', voices:KokoroVoices}); return; }
+  if (message.requestKey !== owner?.requestKey) return;
   if (message.type === 'alive') return;
   const job = owner;
   post(job.port, {...message, id:job.id});

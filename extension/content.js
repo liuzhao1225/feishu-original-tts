@@ -142,6 +142,9 @@
     scanSaved=null;scanning=false;playing=false;paused=false;current=null;lastWord=null;
     clearHighlights();buttons();if(message)status(message);
     send({type:'stop'});
+    // A port belongs to playback, not idle UI or a potentially long DOM scan.
+    const active=port;connected=false;port=null;
+    if(active)try{active.disconnect();}catch(error){fail(error);}
   }
   function contextLost(){
     if(contextInvalidated||disposed)return;
@@ -298,6 +301,7 @@
     await renderCurrent(token);if(token!==epoch)return;
     const voice=voices.find(v=>v.voiceName===$('voice').value);
     if(!voice)throw new Error('没有可用的 Kokoro 音色。');
+    if(!connect())return;
     playing=true;paused=startPaused;buttons();drawProgress();status(paused?'已暂停':current.text);
     const ahead=queue.slice(cursor+1,C.lookaheadEnd(queue,cursor,bufferTarget)).map((chunk,i)=>({
       cacheKey:String(cursor+i+1),text:records.get(chunk.key).text.slice(chunk.start,chunk.end),
@@ -305,7 +309,7 @@
     send({type:'speak',id:current.id,sessionId:epoch,cacheKey:String(cursor),ahead,paused,text:current.text,voice:voice.voiceName,lang:voice.lang,rate:Number($('rate').value)});
   }
   async function begin(onlySelection=false){
-    if(!contextReady()||!connect())return;
+    if(!contextReady())return;
     if(onlySelection&&!chosen?.hasSelection){status('请先拖选正文。',true);return;}
     if(!voices.some(v=>v.voiceName===$('voice').value)){status('Kokoro 音色尚未加载。',true);return;}
     checkCache();const target=chosen;stop();const token=epoch;
@@ -363,8 +367,17 @@
         if(!contextReady())return;
         stop();status(error?.message||'扩展连接已断开，点击播放重新连接。',true);
       });
-      return send({type:'voices'});
+      return true;
     }catch(error){connected=false;port=null;fail(error);return false;}
+  }
+  async function loadVoices(){
+    if(!contextReady())return;
+    try{
+      // One-shot metadata does not need to hold the MV3 worker open.
+      const response=await chrome.runtime.sendMessage({target:'kokoro-background',type:'voices'});
+      if(!response||response.type!=='voices')throw new Error('未能读取 Kokoro 音色。');
+      onMessage(response);
+    }catch(error){fail(error);}
   }
   async function restorePreferences(selected){
     try{
@@ -427,9 +440,6 @@
   }
   function dispose(){
     stop();detach();
-    if(connected&&contextReady()){
-      try{port.disconnect();}catch(error){fail(error);}
-    }
     disposed=true;host.remove();style.remove();delete globalThis.FeishuOriginalTTS;
   }
   globalThis.FeishuOriginalTTS={
@@ -445,11 +455,11 @@
       else requestPaint();
       return true;
     },
-    show(){if(!contextReady())return;host.style.display='';connect();checkCache();buttons();drawProgress();},dispose,contextLost,isContextInvalidated:()=>contextInvalidated,
+    show(){if(!contextReady())return;host.style.display='';checkCache();buttons();drawProgress();},dispose,contextLost,isContextInvalidated:()=>contextInvalidated,
     diagnostics(){return{contextInvalidated,indexReady,scanCount,total,absolute,order:order.slice(),records:[...records.values()],queue:queue.map(x=>({...x})),cursor,scanning,playing,paused,following,lastWord,current:current&&{...current},status:$('status').textContent};}
   };
   $('document-title').textContent=C.normalize(document.title).replace(/\s*[-|｜]\s*飞书云文档.*$/,'');$('document-title').title=$('document-title').textContent;
-  buttons();drawProgress();saveSelection();connect();
+  buttons();drawProgress();saveSelection();loadVoices();
   }
   // Feishu loads the editor asynchronously and can navigate without a page refresh.
   function sync(){

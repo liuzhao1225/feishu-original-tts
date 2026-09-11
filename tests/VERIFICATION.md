@@ -1,3 +1,10 @@
+# 0.5.5 long-document connection lifecycle — 2026-09-11
+
+- Reproduced a live failure on the user-reported long Feishu document (private URL omitted): the first-pass scan stopped after collecting 2,133 blocks, with no completed index or playback. Status was `扩展连接已断开，点击播放重新连接。`; the extension runtime ID remained valid and `contextInvalidated` was false. The originally reported `扩展已更新或停用` status was observed before the first refresh, but its original trigger was not captured.
+- The reader previously opened a playback port before scanning and sent no messages during the scan. The disconnect handler cancelled scanning when the idle MV3 worker closed the port. Voice metadata now uses a single request; the playback port opens after indexing/rendering and closes on stop. No keepalive or automatic retry was added to DOM scanning. Chrome documents the idle-worker/port behavior in [the service worker lifecycle](https://developer.chrome.com/docs/extensions/develop/concepts/service-workers/lifecycle).
+- Four background-routing checks and syntax checks passed. Browser fixtures passed all 33 interaction assertions and eight context scenarios, including a scan deliberately held for more than 30 seconds with no port, followed by exactly one playback connection. Revoked contexts still stop with a visible refresh action.
+- Reloaded the installed unpacked extension from this checkout and reloaded the same document. Its single scan completed with 4,077 blocks and 134,229 indexed UTF-16 characters. Playback advanced from cursor 2 / offset 44 to cursor 4 / offset 166; the real audio-clock word event highlighted `misuse` in the original text. No disconnect or invalidation occurred during that scan. Playback was then paused with the UI showing `继续` / `已暂停`. This verifies the reproduced scan-disconnect path; the exact original invalidated-context trigger remains unconfirmed.
+
 # 0.4.0 verification — 2026-09-10
 
 - Node unit checks: 14 passing. Covers original UTF-16 offsets, Chinese numbers/dates, mixed English, unequal predicted durations, silence, long phoneme splitting, virtualized cache and document order.

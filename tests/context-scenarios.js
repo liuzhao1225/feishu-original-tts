@@ -24,22 +24,34 @@ window.runContextScenarios=async()=>{
   });
   await scenario('connect failure after disconnect presents refresh instead of retrying old context',async({w,$,terminal,check})=>{
    w.testBridge.disconnect.forEach(fn=>fn());let calls=0;w.fixtureChrome.runtime.connect=()=>{calls++;throw new Error('Extension context invalidated.');};
-   $('play').click();terminal();$('play').click();check(calls===1,'dead context was reconnected repeatedly');
+   $('play').click();for(let i=0;i<80&&!calls;i++)await wait(50);terminal();$('play').click();check(calls===1,'dead context was reconnected repeatedly');
   });
   await scenario('synchronous storage write failure is handled visibly',async({w,$,terminal})=>{
    w.fixtureChrome.storage.local.set=()=>{throw new Error('Extension context invalidated.');};$('rate').dispatchEvent(new w.Event('change'));await wait(50);terminal();
   });
-  await scenario('synchronous storage read failure is handled visibly',async({w,terminal})=>{
+  await scenario('synchronous storage read failure is handled visibly',async({w,check})=>{
    w.fixtureChrome.storage.local.get=()=>{throw new Error('Extension context invalidated.');};
-   w.testBridge.listeners.forEach(fn=>fn({type:'voices',voices:[{voiceName:'test',lang:'zh-CN',eventTypes:['word','end']}]}));await wait(50);terminal();
+   w.FeishuOriginalTTS.dispose();w.FeishuTTSLoader.sync();await wait(50);
+   check(w.FeishuOriginalTTS.diagnostics().contextInvalidated,'storage read failure must invalidate the new reader');
   });
   await scenario('invalidation during scanning cancels work and never starts speech',async({w,$,d,check,terminal})=>{
-   $('play').click();check(d().scanning,'expected active scan');w.fixtureChrome.runtime.id=undefined;w.testBridge.disconnect.forEach(fn=>fn());await wait(300);terminal();
+   $('play').click();check(d().scanning,'expected active scan');w.fixtureChrome.runtime.id=undefined;await wait(850);terminal();
    check(!w.testBridge.messages.some(m=>m.type==='speak'),'stale scan started speech');
   });
   await scenario('ordinary disconnect can reconnect on explicit play and reuse cache',async({w,$,d,check,play})=>{
    await play();const scans=d().scanCount;w.testBridge.disconnect.forEach(fn=>fn());check(!d().contextInvalidated&&!d().playing,'ordinary disconnect was treated as revoked context');
    await play();check(d().scanCount===scans,'ordinary reconnect lost cache');
+  });
+  await scenario('scan longer than worker idle timeout opens its first port only when speech starts',async({w,$,d,check})=>{
+   check(!w.testBridge.connections,'idle voice catalog opened a port');
+   const original=w.setTimeout;let delayed=false;
+   w.setTimeout=(fn,ms,...args)=>original(fn,ms===180&&!delayed?(delayed=true,32000):ms,...args);
+   $('play').click();await wait(31000);
+   check(d().scanning&&!d().contextInvalidated&&!w.testBridge.connections,'long scan must not depend on a background port');
+   for(let i=0;i<100&&!d().playing;i++)await wait(50);
+   check(d().playing&&d().scanCount===1&&w.testBridge.connections===1,'completed scan must open one playback connection');
+   w.FeishuOriginalTTS.dispose();
+   check(!w.testBridge.listeners.length&&!w.testBridge.disconnect.length,'stop must release playback port listeners');
   });
   return{ok:true,results};
  }catch(error){return{ok:false,results,error:error.stack};}

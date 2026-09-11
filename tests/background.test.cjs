@@ -6,8 +6,14 @@ function fixture(){
  vm.runInContext(fs.readFileSync('extension/background.js','utf8'),context);
  function port(){const messages=[];let send,disconnect;const p={name:'feishu-original-tts',onMessage:{addListener(fn){send=fn;}},onDisconnect:{addListener(fn){disconnect=fn;}},postMessage(m){messages.push(m);}};connect(p);return {messages,send:m=>send(m),disconnect:()=>disconnect()};}
  const speak=(id,sessionId=1)=>({type:'speak',id,sessionId,cacheKey:String(id),text:'text',voice:'voice',rate:1,ahead:[]});
- return {commands,port,speak,receive:m=>receive({target:'kokoro-background',...m},{id:'fixture'})};
+ return {commands,port,speak,receive:(m,respond)=>receive({target:'kokoro-background',...m},{id:'fixture'},respond)};
 }
+test('voice catalog uses a one-shot request without opening a playback session',()=>{
+ const f=fixture();let response;
+ f.receive({type:'voices'},value=>{response=value;});
+ assert.equal(response.type,'voices');assert.equal(response.voices[0].voiceName,'voice');
+ assert.equal(f.commands.length,0,'metadata must not create offscreen audio work');
+});
 test('background retains session cache identity across end and maps events to current sentence',async()=>{
  const f=fixture(),p=f.port();await p.send(f.speak(1));const first=f.commands.at(-1);
  f.receive({requestKey:first.requestKey,type:'event',event:{type:'end'}});
