@@ -3,7 +3,18 @@
   function mount(root,documentKey){
   const C=globalThis.FeishuTTSCore;
   if(!CSS.highlights||!globalThis.Highlight){alert('请更新 Chrome 以使用原文高亮。');return;}
-  let scroller=root.closest('.bear-web-x-container')||document.querySelector('.bear-web-x-container');
+  function findScroller(){
+    for(let node=root.parentElement;node&&node!==document.body;node=node.parentElement){
+      if(/^(auto|scroll)$/.test(getComputedStyle(node).overflowY)&&node.scrollHeight>node.clientHeight)return node;
+    }
+    return document.scrollingElement;
+  }
+  let scroller=findScroller();
+  function scrollRect(){
+    // The document element's DOM rect spans the page, not the visible viewport.
+    return scroller===document.scrollingElement?{top:0,left:0,right:document.documentElement.clientWidth,bottom:document.documentElement.clientHeight}:scroller.getBoundingClientRect();
+  }
+  const scrollEvents=()=>scroller===document.scrollingElement?document:scroller;
   const host=document.createElement('div');
   host.id='feishu-original-tts';
   host.style.cssText='position:fixed;left:0;right:0;bottom:0;width:100%;z-index:2147483647;';
@@ -81,14 +92,14 @@
   }
   function onScrollbar(event){
     if(!scroller||event.target!==scroller)return;
-    const rect=scroller.getBoundingClientRect();
+    const rect=scrollRect();
     if(event.clientX>=rect.right-Math.max(16,scroller.offsetWidth-scroller.clientWidth))onManualScroll(event);
   }
   document.addEventListener('wheel',onManualScroll,{passive:true,capture:true});
   document.addEventListener('touchmove',onManualScroll,{passive:true,capture:true});
   document.addEventListener('keydown',onManualScroll,true);
   document.addEventListener('pointerdown',onScrollbar,true);
-  scroller?.addEventListener('scroll',requestPaint,{passive:true});
+  scrollEvents()?.addEventListener('scroll',requestPaint,{passive:true});
   followButton.onclick=()=>setFollowing(true);
   setFollowing(true);
   function clearHighlights(){CSS.highlights.delete('feishu-tts-word');CSS.highlights.delete('feishu-tts-sentence');}
@@ -163,7 +174,7 @@
     indexReady=false;queue=[];stop(message);drawProgress();
   }
   function snapshot(){
-    const top=scroller.getBoundingClientRect().top;
+    const top=scrollRect().top;
     return zones().map(zone=>({key:keyOf(zone),text:mapText(zone).text,top:zone.getBoundingClientRect().top-top+scroller.scrollTop})).filter(item=>item.text.trim());
   }
   function checkCache(){
@@ -199,16 +210,27 @@
   }
   document.addEventListener('click',pick,true);
   async function settled(token){
+    const started=performance.now(),timeout=15000;
     await sleep(180);if(token!==epoch)throw new Error('已取消');
-    const rect=scroller.getBoundingClientRect();
-    for(let pass=0;pass<12;pass++){
-      const pending=[...root.querySelectorAll('.bear-virtual-renderUnit-placeholder')].some(e=>{
+    for(;;){
+      const rect=scrollRect();
+      const pending=[...root.querySelectorAll('.bear-virtual-renderUnit-placeholder')].filter(e=>{
         const r=e.getBoundingClientRect();return r.height>4&&r.width>4&&r.bottom>rect.top+10&&r.top<rect.bottom-10&&r.right>rect.left&&r.left<rect.right&&!e.closest('.bear-virtual-pre-renderer');
       });
-      if(!pending)return;
-      await sleep(160);if(token!==epoch)throw new Error('已取消');
+      if(!pending.length)return;
+      const elapsed=performance.now()-started;
+      const progress=Math.min(100,Math.round(scroller.scrollTop/Math.max(1,scroller.scrollHeight-scroller.clientHeight)*100));
+      if(elapsed>=timeout){
+        const error=new Error(`正文读取到 ${progress}% 时等待渲染超过 15 秒，读取已停止。请确认此处正文正常显示后重试。`);
+        error.details={scrollTop:scroller.scrollTop,scrollHeight:scroller.scrollHeight,elapsedMs:Math.round(elapsed),pending:pending.map(e=>{
+          const r=e.getBoundingClientRect();return{parentId:e.getAttribute('data-parent-id'),top:r.top,bottom:r.bottom,height:r.height};
+        })};
+        throw error;
+      }
+      if(elapsed>=1000)status(`首次读取正文 ${progress}% · 等待飞书渲染 ${Math.floor(elapsed/1000)} 秒（可取消）`);
+      // Check the DOM again after every wait, including the deadline wait.
+      await sleep(Math.min(160,timeout-elapsed));if(token!==epoch)throw new Error('已取消');
     }
-    throw new Error('正文尚未渲染完成，读取已停止。请等待飞书加载后重试。');
   }
   async function ensureIndex(token){
     if(location.origin+location.pathname!==documentKey)throw new Error('文档已切换，请重新点击扩展图标。');
@@ -264,7 +286,7 @@
       clearHighlights();
       // Playback owns cached text. A missing virtualized node only defers paint.
       if(following&&scroller?.isConnected){
-        const s=scroller.getBoundingClientRect(),bottom=Math.min(s.bottom,host.getBoundingClientRect().top);
+        const s=scrollRect(),bottom=Math.min(s.bottom,host.getBoundingClientRect().top);
         scroller.scrollTop=Math.max(0,records.get(item.key).top-(bottom-s.top)/2);
       }
       return;
@@ -284,7 +306,7 @@
       const start=item.followStart,end=Math.min(item.end,start+(map.text.codePointAt(start)>0xffff?2:1));
       const anchor=rangeOf(map,start,end);
       if(!anchor)return;
-      const r=anchor.getBoundingClientRect(),s=scroller.getBoundingClientRect();
+      const r=anchor.getBoundingClientRect(),s=scrollRect();
       const top=Math.max(0,s.top)+20,bottom=Math.min(s.bottom,host.getBoundingClientRect().top)-20;
       const delta=(r.top+r.bottom-top-bottom)/2;
       if(Math.abs(delta)>2)scroller.scrollTop+=delta;
@@ -436,7 +458,7 @@
     document.removeEventListener('selectionchange',saveSelection);document.removeEventListener('click',pick,true);root.removeEventListener('input',onEdit,true);
     document.removeEventListener('wheel',onManualScroll,true);document.removeEventListener('touchmove',onManualScroll,true);
     document.removeEventListener('keydown',onManualScroll,true);document.removeEventListener('pointerdown',onScrollbar,true);
-    scroller?.removeEventListener('scroll',requestPaint);
+    scrollEvents()?.removeEventListener('scroll',requestPaint);
   }
   function dispose(){
     stop();detach();
@@ -447,12 +469,16 @@
       if(documentKey!==key||disposed)return false;
       // Feishu may replace the entire editor while keeping this document open.
       if(node&&node!==root){
-        observer.disconnect();root.removeEventListener('input',onEdit,true);scroller?.removeEventListener('scroll',requestPaint);
-        root=node;scroller=root.closest('.bear-web-x-container')||document.querySelector('.bear-web-x-container');
+        observer.disconnect();root.removeEventListener('input',onEdit,true);scrollEvents()?.removeEventListener('scroll',requestPaint);
+        root=node;scroller=findScroller();
         observer.observe(root,{subtree:true,childList:true,characterData:true});root.addEventListener('input',onEdit,true);
-        scroller?.addEventListener('scroll',requestPaint,{passive:true});checkCache();requestPaint();
+        scrollEvents()?.addEventListener('scroll',requestPaint,{passive:true});checkCache();requestPaint();
       }else if(!node)clearHighlights();
-      else requestPaint();
+      else{
+        const next=findScroller();
+        if(next!==scroller){scrollEvents()?.removeEventListener('scroll',requestPaint);scroller=next;scrollEvents()?.addEventListener('scroll',requestPaint,{passive:true});}
+        requestPaint();
+      }
       return true;
     },
     show(){if(!contextReady())return;host.style.display='';checkCache();buttons();drawProgress();},dispose,contextLost,isContextInvalidated:()=>contextInvalidated,
